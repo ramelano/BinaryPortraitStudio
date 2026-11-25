@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Binary Portrait Studio — Interactive 0 &amp; 1 Matrix Art</title>
+  <meta name="description" content="Transform any photo into an interactive 0 & 1 binary character matrix artwork directly in your browser. Supports JPG, PNG, WEBP, and iPhone HEIC." />
+
+  <!-- Tailwind CSS CDN (Zero build step required for GitHub Pages) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- iPhone .HEIC / .HEIF Browser Decoder -->
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+
+  <!-- Typography: JetBrains Mono for crisp binary glyphs & Inter for UI -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-obsidian: #070709;
+      --accent-amber: #ffbe55;
+      --accent-copper: #8a2c0c;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-obsidian);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #f5efe6;
+      user-select: none;
+    }
+
+    #matrixCanvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    /* Glassmorphic Surfaces */
+    .glass-surface {
+      background: rgba(13, 13, 17, 0.78);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 190, 85, 0.16);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 232, 195, 0.08);
+    }
+
+    .glass-pill {
+      background: rgba(15, 15, 20, 0.76);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 190, 85, 0.18);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65);
+    }
+
+    /* Custom Precision Sliders */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 190, 85, 0.16);
+      height: 4px;
+      border-radius: 999px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #ffbe55;
+      border: 2px solid #0d0d11;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(255, 190, 85, 0.7);
+      transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.22);
+      background: #ffd384;
+    }
+
+    @keyframes pulseBorder {
+      0%, 100% { border-color: rgba(255, 190, 85, 0.45); }
+      50% { border-color: rgba(255, 236, 195, 0.95); }
+    }
+
+    .drop-zone-active {
+      animation: pulseBorder 1.3s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Main 60FPS HTML5 Canvas -->
+  <canvas id="matrixCanvas"></canvas>
+
+  <!-- Hidden File Input (.JPG, .PNG, .WEBP, .HEIC, .HEIF) -->
+  <input
+    type="file"
+    id="imageInput"
+    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
+    class="hidden"
+  />
+
+  <!-- Top Navigation Bar -->
+  <header id="topBar" class="fixed top-4 left-4 right-4 z-30 flex items-center justify-between gap-2 pointer-events-none transition-opacity duration-300">
+    <!-- Brand / Open-Source Badge -->
+    <div class="glass-pill pointer-events-auto rounded-full px-3.5 py-2 flex items-center gap-2.5">
+      <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#ffbe55]"></span>
+      <span class="text-[11px] sm:text-xs font-mono font-semibold tracking-wider text-amber-100/95 uppercase">
+        Binary Portrait Studio
+      </span>
+      <span class="hidden md:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300/80 border border-amber-400/20">
+        01 ENGINE
+      </span>
+    </div>
+
+    <!-- Right Controls: Language Switcher (TR/EN) & Hide UI Toggle -->
+    <div class="flex items-center gap-2 pointer-events-auto">
+      <!-- TR / EN Language Toggle -->
+      <button
+        id="langToggleBtn"
+        title="Switch Language / Dil Değiştir"
+        class="glass-pill rounded-full px-3 py-2 flex items-center gap-1.5 text-xs font-mono font-semibold text-amber-200 hover:text-white hover:border-amber-400/40 transition cursor-pointer"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+          <path d="M2 12h20"/>
+        </svg>
+        <span id="langLabel">TR / EN</span>
+      </button>
+
+      <!-- Hide / Show UI Button -->
+      <button
+        id="toggleUiBtn"
+        title="Hide / Show UI (H)"
+        class="glass-pill rounded-full px-3.5 py-2 flex items-center gap-2 text-xs text-amber-100/90 hover:text-white hover:border-amber-400/40 transition cursor-pointer"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        <span id="toggleUiText" class="hidden sm:inline">Arayüzü Gizle</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Clean Empty Landing Upload Card (Zero Pre-loaded Personal Photos) -->
+  <main id="welcomeOverlay" class="fixed inset-0 z-20 flex items-center justify-center p-4 sm:p-6 bg-black/35 backdrop-blur-[2px] transition-opacity duration-500">
+    <div class="glass-surface rounded-3xl p-6 sm:p-9 max-w-md w-full text-center flex flex-col items-center gap-5">
+      <!-- Pill Tag -->
+      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-400/25 text-[11px] font-mono tracking-widest text-amber-200 uppercase">
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+        <span data-i18n="badge">100% Tarayıcı Tabanlı // Gizlilik Odaklı</span>
+      </div>
+
+      <!-- Heading & Description -->
+      <div class="space-y-2">
+        <h1 data-i18n="heroTitle" class="text-xl sm:text-2xl font-bold tracking-tight text-amber-50">
+          Fotoğrafını 0 ve 1 Matrisine Dönüştür
+        </h1>
+        <p data-i18n="heroDesc" class="text-xs sm:text-sm text-zinc-300/80 leading-relaxed">
+          Görselleriniz sunucuya yüklenmez; tamamen cihazınızda işlenerek yüksek çözünürlüklü <span class="font-mono text-amber-300">0</span> ve <span class="font-mono text-amber-300">1</span> karakter animasyonuna dönüştürülür.
+        </p>
+      </div>
+
+      <!-- Primary Upload CTA -->
+      <button
+        id="welcomeUploadBtn"
+        class="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-orange-600 hover:from-amber-300 hover:to-orange-500 text-zinc-950 font-semibold text-sm sm:text-base shadow-lg shadow-amber-950/60 transition transform active:scale-[0.98] flex items-center justify-center gap-2.5 cursor-pointer"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" x2="12" y1="3" y2="15"/>
+        </svg>
+        <span data-i18n="uploadBtn">Fotoğraf Seç (.JPG, .PNG, .WEBP, .HEIC)</span>
+      </button>
+
+      <!-- Drag & Drop / Clipboard Paste Hint -->
+      <p data-i18n="dropHint" class="text-[11px] text-zinc-400 leading-normal">
+        Veya görseli ekrana <strong>sürükleyip bırakın</strong> ya da panodan <strong>Ctrl+V / Cmd+V</strong> ile yapıştırın.
+      </p>
+
+      <!-- Procedural Demo Generator Button (No External Images) -->
+      <div class="w-full pt-3.5 border-t border-amber-200/10 flex items-center justify-center">
+        <button
+          id="trySampleBtn"
+          class="inline-flex items-center gap-1.5 text-xs font-medium text-amber-300/90 hover:text-amber-200 underline underline-offset-4 transition cursor-pointer"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+          <span data-i18n="sampleBtn">Örnek Geometrik Demo Oluştur</span>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- HEIC Conversion / Image Processing Overlay -->
+  <div id="loadingOverlay" class="fixed inset-0 z-40 hidden items-center justify-center p-6 bg-black/80 backdrop-blur-md">
+    <div class="glass-surface rounded-3xl px-8 py-7 flex flex-col items-center gap-4 text-center max-w-xs">
+      <div class="w-10 h-10 rounded-full border-2 border-amber-400/25 border-t-amber-400 animate-spin"></div>
+      <div class="space-y-1">
+        <p id="loadingTitle" class="text-sm font-semibold text-amber-100">HEIC fotoğraf dönüştürülüyor...</p>
+        <p id="loadingSub" class="text-xs text-zinc-400">Yüksek çözünürlüklü 0 &amp; 1 matrisi hazırlanıyor</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Collapsible Floating Studio Control Dock -->
+  <section
+    id="controlBar"
+    class="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 w-[96vw] max-w-5xl transition-all duration-300 opacity-0 pointer-events-none translate-y-6"
+  >
+    <div class="glass-surface rounded-2xl p-3 sm:p-4 flex flex-col gap-3">
+      <!-- Top Row: Action Buttons, Palette & Physics Selectors, Collapse Toggle -->
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <!-- Left Group: Change Image, Save PNG, Export Standalone HTML -->
+        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <button
+            id="newPhotoBtn"
+            class="flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-zinc-950 text-xs font-semibold px-3 py-2 rounded-xl shadow-md transition active:scale-95 cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+              <circle cx="9" cy="9" r="2"/>
+              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+            </svg>
+            <span data-i18n="changeImgBtn">Yeni Görsel</span>
+          </button>
+
+          <button
+            id="savePngBtn"
+            class="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-amber-100 text-xs font-medium px-3 py-2 rounded-xl border border-amber-200/20 transition active:scale-95 cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" x2="12" y1="15" y2="3"/>
+            </svg>
+            <span data-i18n="savePngBtn">PNG Kaydet</span>
+          </button>
+
+          <button
+            id="exportHtmlBtn"
+            class="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-amber-100 text-xs font-medium px-3 py-2 rounded-xl border border-amber-200/20 transition active:scale-95 cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+            <span data-i18n="exportHtmlBtn">Tek Dosya HTML İndir</span>
+          </button>
+        </div>
+
+        <!-- Right Group: Palette, Physics Mode, Replay Assemble, Collapse Sliders -->
+        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <!-- Color Palette Selector -->
+          <div class="flex items-center gap-1.5 bg-black/50 border border-amber-200/15 rounded-xl px-2.5 py-1.5">
+            <select id="paletteSelect" aria-label="Color Palette" class="bg-transparent text-xs text-amber-100 font-medium focus:outline-none cursor-pointer">
+              <option value="amber" class="bg-zinc-950 text-amber-100">Kehribar &amp; Bakır</option>
+              <option value="crimson" class="bg-zinc-950 text-amber-100">Kızıl &amp; Altın</option>
+              <option value="original" class="bg-zinc-950 text-amber-100">Orijinal Renkler</option>
+              <option value="matrix" class="bg-zinc-950 text-amber-100">Matrix Fosfor Yeşili</option>
+              <option value="silver" class="bg-zinc-950 text-amber-100">Gümüş Monokrom</option>
+            </select>
+          </div>
+
+          <!-- Animation & Physics Mode Selector -->
+          <div class="flex items-center gap-1.5 bg-black/50 border border-amber-200/15 rounded-xl px-2.5 py-1.5">
+            <select id="motionSelect" aria-label="Animation Mode" class="bg-transparent text-xs text-amber-100 font-medium focus:outline-none cursor-pointer">
+              <option value="wave" class="bg-zinc-950 text-amber-100">Sinematik Dalga &amp; Nefes</option>
+              <option value="vortex" class="bg-zinc-950 text-amber-100">Girdap Birleşimi (Vortex)</option>
+              <option value="cursor" class="bg-zinc-950 text-amber-100">Etkileşimli İmleç Alanı</option>
+            </select>
+          </div>
+
+          <!-- Replay Vortex Assemble Trigger -->
+          <button
+            id="morphTriggerBtn"
+            class="bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 text-xs font-medium px-3 py-1.5 rounded-xl border border-amber-400/25 transition active:scale-95 cursor-pointer"
+          >
+            <span data-i18n="replayBtn">Tekrar Birleştir</span>
+          </button>
+
+          <!-- Collapse / Expand Sliders Drawer -->
+          <button
+            id="collapseDockBtn"
+            title="Paneli Daralt / Genişlet"
+            class="bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white p-1.5 rounded-xl border border-white/10 transition cursor-pointer"
+          >
+            <svg id="collapseChevron" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Bottom Row: Collapsible Precision Sliders (Density, Contrast, Glow) -->
+      <div id="dockSlidersRow" class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6 pt-2.5 border-t border-amber-200/10 text-xs">
+        <label class="flex flex-col gap-1">
+          <div class="flex justify-between text-[11px] text-zinc-300/80">
+            <span data-i18n="densityLabel">Detay / Yoğunluk</span>
+            <span id="densityVal" class="font-mono text-amber-300">4px</span>
+          </div>
+          <input type="range" id="densitySlider" min="3" max="10" step="1" value="4" />
+        </label>
+
+        <label class="flex flex-col gap-1">
+          <div class="flex justify-between text-[11px] text-zinc-300/80">
+            <span data-i18n="contrastLabel">Kontrast &amp; Netlik</span>
+            <span id="contrastVal" class="font-mono text-amber-300">1.25</span>
+          </div>
+          <input type="range" id="contrastSlider" min="0.80" max="2.00" step="0.05" value="1.25" />
+        </label>
+
+        <label class="flex flex-col gap-1">
+          <div class="flex justify-between text-[11px] text-zinc-300/80">
+            <span data-i18n="glowLabel">Fosfor Parıltısı (Glow)</span>
+            <span id="glowVal" class="font-mono text-amber-300">45%</span>
+          </div>
+          <input type="range" id="glowSlider" min="0" max="100" step="5" value="45" />
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <!-- Full-Window Drag & Drop Overlay -->
+  <div id="dropOverlay" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden items-center justify-center p-6 pointer-events-none">
+    <div class="drop-zone-active border-2 border-dashed border-amber-400 rounded-3xl p-10 text-center max-w-md bg-zinc-950/90 shadow-2xl">
+      <div class="text-4xl mb-3 font-mono font-bold text-amber-400">0101</div>
+      <h2 data-i18n="dropTitle" class="text-lg font-semibold text-amber-100 mb-1">Fotoğrafı Buraya Bırakın</h2>
+      <p data-i18n="dropSub" class="text-xs text-zinc-400">.JPG, .PNG, .WEBP ve iPhone .HEIC dosyaları anında işlenir</p>
+    </div>
+  </div>
+
+  <!-- Non-blocking Glassmorphic Toast Notification -->
+  <div id="toastBox" class="fixed top-16 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-all duration-300 transform -translate-y-2">
+    <div id="toastText" class="glass-pill rounded-full px-5 py-2.5 text-xs font-medium text-amber-100 shadow-xl border border-amber-400/30">
+      Notification
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ============================================================================
+     * BINARY PORTRAIT STUDIO — OPEN-SOURCE SINGLE-FILE ENGINE
+     * - Zero pre-loaded personal photos or external tracking.
+     * - Client-side .HEIC/.HEIF decoding via heic2any.
+     * - 3x3 Unsharp Mask edge sharpening + S-curve luminance mapping.
+     * - Offscreen quantized glyph atlas for smooth 60FPS rendering.
+     * ============================================================================
+     */
+
+    // Remains null in the clean open-source distribution; populated only if a user
+    // clicks "Export Standalone HTML" to save their own personal offline copy.
+    const EMBEDDED_IMAGE_DATA = null;
+
+    const INITIAL_CONFIG = {
+      lang: 'tr',
+      palette: 'amber',
+      motion: 'wave',
+      cellSize: 4,
+      contrast: 1.25,
+      glow: 0.45
+    };
+
+    // Bilingual Dictionary (Turkish & English)
+    const I18N = {
+      tr: {
+        badge: '100% Tarayıcı Tabanlı // Gizlilik Odaklı',
+        heroTitle: 'Fotoğrafını 0 ve 1 Matrisine Dönüştür',
+        heroDesc: 'Görselleriniz sunucuya yüklenmez; tamamen cihazınızda işlenerek yüksek çözünürlüklü 0 ve 1 karakter animasyonuna dönüştürülür.',
+        uploadBtn: 'Fotoğraf Seç (.JPG, .PNG, .WEBP, .HEIC)',
+        dropHint: 'Veya görseli ekrana sürükleyip bırakın ya da panodan Ctrl+V / Cmd+V ile yapıştırın.',
+        sampleBtn: 'Örnek Geometrik Demo Oluştur',
+        hideUi: 'Arayüzü Gizle',
+        showUi: 'Arayüzü Göster',
+        changeImgBtn: 'Yeni Görsel',
+        savePngBtn: 'PNG Kaydet',
+        exportHtmlBtn: 'Tek Dosya HTML İndir',
+        replayBtn: 'Tekrar Birleştir',
+        densityLabel: 'Detay / Yoğunluk',
+        contrastLabel: 'Kontrast & Netlik',
+        glowLabel: 'Fosfor Parıltısı (Glow)',
+        dropTitle: 'Fotoğrafı Buraya Bırakın',
+        dropSub: '.JPG, .PNG, .WEBP ve iPhone .HEIC dosyaları anında işlenir',
+        loadingHeicTitle: 'HEIC fotoğraf dönüştürülüyor...',
+        loadingHeicSub: 'Yüksek çözünürlüklü 0 & 1 matrisi hazırlanıyor',
+        palettes: {
+          amber: 'Kehribar & Bakır',
+          crimson: 'Kızıl & Altın',
+          original: 'Orijinal Renkler',
+          matrix: 'Matrix Fosfor Yeşili',
+          silver: 'Gümüş Monokrom'
+        },
+        motions: {
+          wave: 'Sinematik Dalga & Nefes',
+          vortex: 'Girdap Birleşimi (Vortex)',
+          cursor: 'Etkileşimli İmleç Alanı'
+        },
+        toasts: {
+          processed: 'Görsel 0 & 1 matrisine başarıyla işlendi.',
+          demoLoaded: 'Prosedürel geometrik demo oluşturuldu.',
+          invalidFile: 'Lütfen geçerli bir görsel dosyası (.JPG, .PNG, .WEBP, .HEIC) seçin.',
+          loadError: 'Görsel yüklenemedi. Lütfen farklı bir dosya deneyin.',
+          heicError: 'HEIC dönüştürme sırasında hata oluştu.',
+          pngSaved: 'Yüksek çözünürlüklü PNG kaydedildi!',
+          htmlExported: 'Kişisel çevrimdışı HTML dosyanız indirildi!',
+          uiHidden: 'Tam ekran görünüm (Geri açmak için H tuşu veya sağ üstteki buton)'
+        }
+      },
+      en: {
+        badge: '100% Client-Side // Privacy First',
+        heroTitle: 'Transform Any Photo into a 0 & 1 Matrix',
+        heroDesc: 'Your photos never leave your device. Images are processed locally in real time into an interactive binary character artwork.',
+        uploadBtn: 'Select Image (.JPG, .PNG, .WEBP, .HEIC)',
+        dropHint: 'Or drag & drop an image anywhere on screen, or paste from clipboard (Ctrl+V / Cmd+V).',
+        sampleBtn: 'Try Procedural Geometric Demo',
+        hideUi: 'Hide UI',
+        showUi: 'Show UI',
+        changeImgBtn: 'Change Image',
+        savePngBtn: 'Save PNG',
+        exportHtmlBtn: 'Export Standalone HTML',
+        replayBtn: 'Replay Assemble',
+        densityLabel: 'Grid Density',
+        contrastLabel: 'Contrast & Crispness',
+        glowLabel: 'Phosphor Glow',
+        dropTitle: 'Drop Your Image Here',
+        dropSub: '.JPG, .PNG, .WEBP and iPhone .HEIC files are processed instantly',
+        loadingHeicTitle: 'Decoding HEIC image...',
+        loadingHeicSub: 'Building high-resolution 0 & 1 character matrix',
+        palettes: {
+          amber: 'Amber & Copper',
+          crimson: 'Crimson & Gold',
+          original: 'Original Colors',
+          matrix: 'Matrix Phosphor',
+          silver: 'Silver Monochrome'
+        },
+        motions: {
+          wave: 'Cinematic Wave & Breathe',
+          vortex: 'Vortex Assemble',
+          cursor: 'Interactive Cursor Field'
+        },
+        toasts: {
+          processed: 'Image successfully rendered into 0 & 1 matrix.',
+          demoLoaded: 'Procedural geometric demo generated.',
+          invalidFile: 'Please select a valid image file (.JPG, .PNG, .WEBP, .HEIC).',
+          loadError: 'Could not load image. Please try another file.',
+          heicError: 'Failed to decode HEIC image. Please try again.',
+          pngSaved: 'High-resolution PNG snapshot saved!',
+          htmlExported: 'Standalone offline HTML file exported!',
+          uiHidden: 'Clean fullscreen view (Press H or top-right button to restore UI)'
+        }
+      }
+    };
+
+    // Canvas & Offscreen Buffers
+    const canvas = document.getElementById('matrixCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    const sampleCanvas = document.createElement('canvas');
+    const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+    const glowCanvas = document.createElement('canvas');
+    const glowCtx = glowCanvas.getContext('2d');
+
+    // Application State
+    const state = {
+      lang: INITIAL_CONFIG.lang,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      dpr: Math.min(window.devicePixelRatio || 1, 2),
+      cellSize: INITIAL_CONFIG.cellSize,
+      palette: INITIAL_CONFIG.palette,
+      motion: INITIAL_CONFIG.motion,
+      contrast: INITIAL_CONFIG.contrast,
+      glow: INITIAL_CONFIG.glow,
+      hasPhoto: false,
+      sourceImage: null,
+      particles: [],
+      ambientParticles: [],
+      uiVisible: true,
+      dockCollapsed: false,
+      time: 0,
+      morphStartTime: -999,
+      pointer: {
+        x: -9999,
+        y: -9999,
+        active: false
+      }
+    };
+
+    // UI References
+    const ui = {
+      imageInput: document.getElementById('imageInput'),
+      welcomeOverlay: document.getElementById('welcomeOverlay'),
+      welcomeUploadBtn: document.getElementById('welcomeUploadBtn'),
+      trySampleBtn: document.getElementById('trySampleBtn'),
+      loadingOverlay: document.getElementById('loadingOverlay'),
+      loadingTitle: document.getElementById('loadingTitle'),
+      loadingSub: document.getElementById('loadingSub'),
+      controlBar: document.getElementById('controlBar'),
+      newPhotoBtn: document.getElementById('newPhotoBtn'),
+      savePngBtn: document.getElementById('savePngBtn'),
+      exportHtmlBtn: document.getElementById('exportHtmlBtn'),
+      paletteSelect: document.getElementById('paletteSelect'),
+      motionSelect: document.getElementById('motionSelect'),
+      morphTriggerBtn: document.getElementById('morphTriggerBtn'),
+      collapseDockBtn: document.getElementById('collapseDockBtn'),
+      collapseChevron: document.getElementById('collapseChevron'),
+      dockSlidersRow: document.getElementById('dockSlidersRow'),
+      densitySlider: document.getElementById('densitySlider'),
+      contrastSlider: document.getElementById('contrastSlider'),
+      glowSlider: document.getElementById('glowSlider'),
+      densityVal: document.getElementById('densityVal'),
+      contrastVal: document.getElementById('contrastVal'),
+      glowVal: document.getElementById('glowVal'),
+      langToggleBtn: document.getElementById('langToggleBtn'),
+      langLabel: document.getElementById('langLabel'),
+      toggleUiBtn: document.getElementById('toggleUiBtn'),
+      toggleUiText: document.getElementById('toggleUiText'),
+      dropOverlay: document.getElementById('dropOverlay'),
+      toastBox: document.getElementById('toastBox'),
+      toastText: document.getElementById('toastText')
+    };
+
+    // Toast Helper
+    let toastTimer = null;
+    function showToast(message) {
+      ui.toastText.textContent = message;
+      ui.toastBox.classList.remove('opacity-0', '-translate-y-2');
+      ui.toastBox.classList.add('opacity-100', 'translate-y-0');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        ui.toastBox.classList.remove('opacity-100', 'translate-y-0');
+        ui.toastBox.classList.add('opacity-0', '-translate-y-2');
+      }, 3200);
+    }
+
+    /**
+     * Apply Localization (TR / EN) across all UI labels & selects
+     */
+    function applyLanguage(lang) {
+      state.lang = lang;
+      const dict = I18N[lang] || I18N.tr;
+      document.documentElement.lang = lang;
+      ui.langLabel.textContent = lang === 'tr' ? 'TR / EN' : 'EN / TR';
+
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          el.textContent = dict[key];
+        }
+      });
+
+      ui.toggleUiText.textContent = state.uiVisible ? dict.hideUi : dict.showUi;
+      ui.loadingTitle.textContent = dict.loadingHeicTitle;
+      ui.loadingSub.textContent = dict.loadingHeicSub;
+
+      // Update Palette Select options
+      Array.from(ui.paletteSelect.options).forEach((opt) => {
+        if (dict.palettes[opt.value]) {
+          opt.textContent = dict.palettes[opt.value];
+        }
+      });
+
+      // Update Motion Select options
+      Array.from(ui.motionSelect.options).forEach((opt) => {
+        if (dict.motions[opt.value]) {
+          opt.textContent = dict.motions[opt.value];
+        }
+      });
+    }
+
+    /**
+     * Offscreen Glyph Sprite Atlas
+     * Pre-renders quantized colored '0' and '1' characters onto offscreen canvases
+     * so 80,000+ characters render smoothly at 60FPS via GPU drawImage.
+     */
+    const glyphCache = {
+      fontSize: 0,
+      dpr: 1,
+      cellW: 0,
+      cellH: 0,
+      sprites: new Map(),
+
+      reset(fontSize, dpr) {
+        this.fontSize = fontSize;
+        this.dpr = dpr;
+        this.cellW = Math.ceil(fontSize * 0.85 * dpr);
+        this.cellH = Math.ceil(fontSize * 1.25 * dpr);
+        this.sprites.clear();
+      },
+
+      get(bit, r, g, b) {
+        const qr = r >> 3;
+        const qg = g >> 3;
+        const qb = b >> 3;
+        const key = (bit === '1' ? 32768 : 0) | (qr << 10) | (qg << 5) | qb;
+
+        let sprite = this.sprites.get(key);
+        if (sprite) return sprite;
+
+        if (this.sprites.size > 4096) {
+          this.sprites.clear();
+        }
+
+        sprite = document.createElement('canvas');
+        sprite.width = this.cellW;
+        sprite.height = this.cellH;
+        const sCtx = sprite.getContext('2d');
+        sCtx.font = `700 ${Math.round(this.fontSize * this.dpr)}px "JetBrains Mono", "Courier New", monospace`;
+        sCtx.textAlign = 'center';
+        sCtx.textBaseline = 'middle';
+        sCtx.fillStyle = `rgb(${r},${g},${b})`;
+        sCtx.fillText(bit, this.cellW * 0.5, this.cellH * 0.52);
+
+        this.sprites.set(key, sprite);
+        return sprite;
+      }
+    };
+
+    /**
+     * Color Palette Mapper
+     * Maps normalized luminance (0..1) and original RGB into the active aesthetic palette.
+     */
+    function computePaletteRGB(lum, r, g, b, palette) {
+      if (palette === 'original') {
+        const gain = 0.28 + Math.pow(lum, 0.85) * 1.15;
+        return [
+          Math.min(255, Math.round(r * gain + lum * 16)),
+          Math.min(255, Math.round(g * gain + lum * 14)),
+          Math.min(255, Math.round(b * gain + lum * 12))
+        ];
+      }
+
+      if (palette === 'matrix') {
+        // Matrix Phosphor: Deep emerald shadows -> vivid neon green highlights
+        if (lum < 0.30) {
+          const t = lum / 0.30;
+          return [Math.round(6 + t * 14), Math.round(42 + t * 98), Math.round(16 + t * 44)];
+        } else if (lum < 0.74) {
+          const t = (lum - 0.30) / 0.44;
+          return [Math.round(20 + t * 95), Math.round(140 + t * 105), Math.round(60 + t * 88)];
+        } else {
+          const t = (lum - 0.74) / 0.26;
+          return [Math.round(115 + t * 120), Math.round(245 + t * 10), Math.round(148 + t * 92)];
+        }
+      }
+
+      if (palette === 'silver') {
+        // Silver Monochrome: High-contrast platinum/silver grayscale
+        const v = Math.round(28 + Math.pow(lum, 0.95) * 224);
+        return [
+          Math.min(255, Math.round(v * 0.98)),
+          Math.min(255, v),
+          Math.min(255, Math.round(v * 1.03))
+        ];
+      }
+
+      if (palette === 'crimson') {
+        // Crimson & Gold: Deep cinema crimson shadows -> warm gold & ivory highlights
+        if (lum < 0.32) {
+          const t = lum / 0.32;
+          return [
+            Math.round(52 + t * 118),
+            Math.round(8 + t * 24),
+            Math.round(16 + t * 24)
+          ];
+        } else if (lum < 0.72) {
+          const t = (lum - 0.32) / 0.40;
+          return [
+            Math.round(170 + t * 82),
+            Math.round(32 + t * 155),
+            Math.round(40 + t * 68)
+          ];
+        } else {
+          const t = (lum - 0.72) / 0.28;
+          return [
+            255,
+            Math.round(187 + t * 58),
+            Math.round(108 + t * 124)
+          ];
+        }
+      }
+
+      // DEFAULT: 'amber' — Amber & Copper (#8a2c0c shadows -> #ffbe55 highlights)
+      if (lum < 0.28) {
+        const t = lum / 0.28;
+        return [
+          Math.round(46 + t * 92),   // -> 138 (#8a)
+          Math.round(14 + t * 30),   // -> 44  (#2c)
+          Math.round(5 + t * 7)      // -> 12  (#0c)
+        ];
+      } else if (lum < 0.74) {
+        const t = (lum - 0.28) / 0.46;
+        return [
+          Math.round(138 + t * 117), // -> 255 (#ff)
+          Math.round(44 + t * 146),  // -> 190 (#be)
+          Math.round(12 + t * 73)    // -> 85  (#55)
+        ];
+      } else {
+        const t = (lum - 0.74) / 0.26;
+        return [
+          255,
+          Math.round(190 + t * 54),
+          Math.round(85 + t * 145)
+        ];
+      }
+    }
+
+    /**
+     * Ambient Floating Binary Field for the Empty Landing State
+     */
+    function buildAmbientField() {
+      state.width = window.innerWidth;
+      state.height = window.innerHeight;
+      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      canvas.width = Math.floor(state.width * state.dpr);
+      canvas.height = Math.floor(state.height * state.dpr);
+      ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+
+      const stepX = 16;
+      const stepY = 18;
+      const cols = Math.ceil(state.width / stepX);
+      const rows = Math.ceil(state.height / stepY);
+      const list = [];
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          list.push({
+            baseX: c * stepX + stepX * 0.5,
+            baseY: r * stepY + stepY * 0.5,
+            bit: ((r + c) & 1) === 0 ? '0' : '1',
+            phase: c * 0.16 + r * 0.14 + Math.random() * 1.4,
+            speed: 0.4 + Math.random() * 0.9,
+            flipTimer: Math.random() * 2.5
+          });
+        }
+      }
+      state.ambientParticles = list;
+    }
+
+    /**
+     * Procedural Mathematical Geometric Portrait / Nebula Generator
+     * Synthesizes an intricate mathematical silhouette & cosmic spiral on the fly
+     * so visitors can test the engine with zero external personal photos.
+     */
+    function generateProceduralDemoCanvas() {
+      const size = 960;
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const g = c.getContext('2d');
+      const cx = size * 0.5;
+      const cy = size * 0.5;
+
+      // Obsidian backdrop
+      g.fillStyle = '#070709';
+      g.fillRect(0, 0, size, size);
+
+      // Volumetric radial nebula aura
+      const aura = g.createRadialGradient(cx, cy, 40, cx, cy, 440);
+      aura.addColorStop(0, 'rgba(255, 220, 165, 0.95)');
+      aura.addColorStop(0.32, 'rgba(220, 130, 58, 0.65)');
+      aura.addColorStop(0.68, 'rgba(110, 42, 16, 0.28)');
+      aura.addColorStop(1, 'rgba(7, 7, 9, 0)');
+      g.fillStyle = aura;
+      g.fillRect(0, 0, size, size);
+
+      // Fibonacci Golden-Angle Nebula Nodes
+      const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+      const count = 1400;
+      for (let i = 1; i < count; i++) {
+        const radius = Math.sqrt(i / count) * 410;
+        const theta = i * goldenAngle;
+        const px = cx + Math.cos(theta) * radius;
+        const py = cy + Math.sin(theta) * radius;
+        const dotR = 1.4 + (1 - radius / 420) * 4.2;
+        const alpha = 0.18 + (1 - radius / 420) * 0.65;
+
+        g.fillStyle = i % 3 === 0
+          ? `rgba(255, 238, 205, ${alpha.toFixed(2)})`
+          : `rgba(235, 145, 70, ${(alpha * 0.85).toFixed(2)})`;
+        g.beginPath();
+        g.arc(px, py, dotR, 0, Math.PI * 2);
+        g.fill();
+      }
+
+      // Sacred Geometry Concentric Rings & Parametric Rose Curves
+      g.save();
+      g.translate(cx, cy);
+      for (let ring = 1; ring <= 5; ring++) {
+        const r = ring * 68;
+        g.strokeStyle = `rgba(255, 210, 140, ${0.42 - ring * 0.05})`;
+        g.lineWidth = ring === 3 ? 3.5 : 1.8;
+        g.beginPath();
+        g.arc(0, 0, r, 0, Math.PI * 2);
+        g.stroke();
+      }
+
+      // Parametric Harmonic Portrait / Iris Core
+      g.strokeStyle = 'rgba(255, 245, 225, 0.85)';
+      g.lineWidth = 2.4;
+      g.beginPath();
+      for (let a = 0; a <= Math.PI * 2 + 0.02; a += 0.015) {
+        const r = 155 + 42 * Math.cos(6 * a) + 18 * Math.sin(12 * a);
+        const x = Math.cos(a) * r;
+        const y = Math.sin(a) * r * 1.12;
+        if (a === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+      }
+      g.closePath();
+      g.stroke();
+
+      // Inner Dark Aperture & Radiant Core
+      g.fillStyle = '#070709';
+      g.beginPath();
+      g.arc(0, 0, 74, 0, Math.PI * 2);
+      g.fill();
+
+      const coreGlow = g.createRadialGradient(0, 0, 4, 0, 0, 62);
+      coreGlow.addColorStop(0, '#ffffff');
+      coreGlow.addColorStop(0.35, '#ffbe55');
+      coreGlow.addColorStop(1, 'rgba(138, 44, 12, 0)');
+      g.fillStyle = coreGlow;
+      g.beginPath();
+      g.arc(0, 0, 62, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+
+      return c;
+    }
+
+    /**
+     * Offscreen Image Sampling & 3x3 Unsharp Mask Sharpening Pipeline
+     */
+    function buildPhotoMatrix() {
+      state.width = window.innerWidth;
+      state.height = window.innerHeight;
+      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      canvas.width = Math.floor(state.width * state.dpr);
+      canvas.height = Math.floor(state.height * state.dpr);
+      ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+
+      if (!state.hasPhoto || !state.sourceImage) {
+        buildAmbientField();
+        return;
+      }
+
+      const cell = state.cellSize;
+      const stepX = Math.max(2.4, cell * 0.76);
+      const stepY = Math.max(3.0, cell);
+      const fontSize = Math.max(3, Math.round(cell * 1.05));
+
+      glyphCache.reset(fontSize, state.dpr);
+
+      const cols = Math.floor(state.width / stepX);
+      const rows = Math.floor(state.height / stepY);
+
+      sampleCanvas.width = cols;
+      sampleCanvas.height = rows;
+
+      // Fill background with obsidian #070709
+      sampleCtx.fillStyle = '#070709';
+      sampleCtx.fillRect(0, 0, cols, rows);
+
+      const src = state.sourceImage;
+      const srcW = src.naturalWidth || src.width;
+      const srcH = src.naturalHeight || src.height;
+
+      // Aspect-ratio-preserving contain fit
+      const scale = Math.min(cols / srcW, rows / srcH) * 0.94;
+      const drawW = srcW * scale;
+      const drawH = srcH * scale;
+      const offsetX = (cols - drawW) * 0.5;
+      const offsetY = (rows - drawH) * 0.5;
+
+      sampleCtx.imageSmoothingEnabled = true;
+      sampleCtx.imageSmoothingQuality = 'high';
+      sampleCtx.drawImage(src, offsetX, offsetY, drawW, drawH);
+
+      const rawData = sampleCtx.getImageData(0, 0, cols, rows).data;
+      const totalCells = cols * rows;
+
+      // Compute normalized luminance buffer
+      const lumBuffer = new Float32Array(totalCells);
+      for (let i = 0; i < totalCells; i++) {
+        const pIdx = i * 4;
+        lumBuffer[i] = (0.299 * rawData[pIdx] + 0.587 * rawData[pIdx + 1] + 0.114 * rawData[pIdx + 2]) / 255;
+      }
+
+      // 3x3 Unsharp Mask Edge Sharpening Kernel
+      const sharpLum = new Float32Array(totalCells);
+      const sharpAmount = 0.58;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          const centerVal = lumBuffer[idx];
+
+          if (r === 0 || r === rows - 1 || c === 0 || c === cols - 1) {
+            sharpLum[idx] = centerVal;
+            continue;
+          }
+
+          const avgNeighbor = (
+            lumBuffer[idx - cols - 1] + lumBuffer[idx - cols] + lumBuffer[idx - cols + 1] +
+            lumBuffer[idx - 1]        +                        lumBuffer[idx + 1] +
+            lumBuffer[idx + cols - 1] + lumBuffer[idx + cols] + lumBuffer[idx + cols + 1]
+          ) * 0.125;
+
+          const sharpened = centerVal + (centerVal - avgNeighbor) * sharpAmount;
+          sharpLum[idx] = Math.max(0, Math.min(1, sharpened));
+        }
+      }
+
+      const centerX = state.width * 0.5;
+      const centerY = state.height * 0.5;
+      const particles = [];
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          const baseLum = sharpLum[idx];
+
+          // Leave near-black pixels as clean obsidian background
+          if (baseLum < 0.055) continue;
+
+          const pIdx = idx * 4;
+          const homeX = c * stepX + stepX * 0.5;
+          const homeY = r * stepY + stepY * 0.5;
+          const dx = homeX - centerX;
+          const dy = homeY - centerY;
+
+          particles.push({
+            homeX,
+            homeY,
+            x: homeX,
+            y: homeY,
+            r: rawData[pIdx],
+            g: rawData[pIdx + 1],
+            b: rawData[pIdx + 2],
+            baseLum,
+            bit: ((r + c) & 1) === 0 ? '0' : '1',
+            flipTimer: Math.random() * 2.2,
+            flipSpeed: 0.35 + Math.random() * 1.35,
+            phase: Math.random() * Math.PI * 2,
+            dist: Math.hypot(dx, dy),
+            angle: Math.atan2(dy, dx),
+            spinDir: (Math.random() > 0.25 ? 1 : -0.75) * (0.65 + Math.random() * 0.6)
+          });
+        }
+      }
+
+      state.particles = particles;
+    }
+
+    /**
+     * Render a Single Frame of the Binary Matrix onto the Main Canvas
+     */
+    function drawMatrixFrame(dt) {
+      // Clear with sleek obsidian/charcoal (#070709)
+      ctx.fillStyle = '#070709';
+      ctx.fillRect(0, 0, state.width, state.height);
+
+      // 1) Empty Landing State: Ambient Floating Binary Particle Field
+      if (!state.hasPhoto) {
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const ambient = state.ambientParticles;
+        const ptrActive = state.pointer.active;
+        const ptrX = state.pointer.x;
+        const ptrY = state.pointer.y;
+
+        for (let i = 0; i < ambient.length; i++) {
+          const p = ambient[i];
+          p.flipTimer -= dt * p.speed;
+          if (p.flipTimer <= 0) {
+            p.bit = p.bit === '0' ? '1' : '0';
+            p.flipTimer = 0.7 + Math.random() * 2.4;
+          }
+
+          const wave = (Math.sin(state.time * 1.4 + p.phase) + 1) * 0.5;
+          let drawX = p.baseX + Math.sin(state.time * 0.8 + p.phase) * 2.2;
+          let drawY = p.baseY + Math.cos(state.time * 0.7 + p.phase) * 2.2;
+          let alpha = 0.05 + wave * 0.16;
+
+          if (ptrActive) {
+            const dx = drawX - ptrX;
+            const dy = drawY - ptrY;
+            const dSq = dx * dx + dy * dy;
+            if (dSq < 19600 && dSq > 1) {
+              const dist = Math.sqrt(dSq);
+              const force = 1 - dist / 140;
+              drawX += (dx / dist) * force * 10;
+              drawY += (dy / dist) * force * 10;
+              alpha += force * 0.35;
+            }
+          }
+
+          ctx.fillStyle = `rgba(255, 190, 85, ${Math.min(0.75, alpha).toFixed(3)})`;
+          ctx.fillText(p.bit, drawX, drawY);
+        }
+        return;
+      }
+
+      // 2) Active Photo / Demo Matrix Mode
+      const particles = state.particles;
+      const contrast = state.contrast;
+      const palette = state.palette;
+      const motion = state.motion;
+      const centerX = state.width * 0.5;
+      const centerY = state.height * 0.5;
+      const maxRadius = Math.hypot(centerX, centerY);
+
+      // Compute Vortex Morph Factor (0 = Crisp Portrait, 1 = Full Cosmic Vortex)
+      let morphFactor = 0;
+      const morphElapsed = state.time - state.morphStartTime;
+
+      if (morphElapsed >= 0 && morphElapsed < 3.6) {
+        // Smooth ease-out-cubic reassembly from vortex into portrait
+        const progress = morphElapsed / 3.6;
+        morphFactor = Math.pow(1 - progress, 2.4);
+      } else if (motion === 'vortex') {
+        // Periodic autonomous vortex swirl & reassemble cycle
+        const cycle = (state.time % 9.5) / 9.5;
+        if (cycle > 0.45 && cycle < 0.95) {
+          const t = (cycle - 0.45) / 0.50;
+          const s = Math.sin(t * Math.PI);
+          morphFactor = s * s;
+        }
+      }
+
+      // Diagonal cinematic light sweep
+      const sweepPos = ((state.time * 0.24) % 1.8) - 0.4;
+      const breathePhase = state.time * 1.6;
+
+      const drawW = glyphCache.cellW / state.dpr;
+      const drawH = glyphCache.cellH / state.dpr;
+      const halfW = drawW * 0.5;
+      const halfH = drawH * 0.5;
+
+      const ptrActive = state.pointer.active;
+      const ptrX = state.pointer.x;
+      const ptrY = state.pointer.y;
+      const cursorRadius = motion === 'cursor' ? 145 : 95;
+      const cursorPush = motion === 'cursor' ? 22 : 8;
+      const cursorGlow = motion === 'cursor' ? 0.52 : 0.30;
+
+      for (let i = 0, len = particles.length; i < len; i++) {
+        const p = particles[i];
+
+        // Adjustable Contrast + S-Curve Tone Mapping
+        let lum = (p.baseLum - 0.5) * contrast + 0.5;
+        lum = Math.max(0.06, Math.min(1, lum));
+        lum = lum * lum * (3 - 2 * lum) * 0.35 + lum * 0.65;
+
+        // Cinematic Wave & Breathe lighting sweep
+        const diag = (p.homeX / state.width) * 0.65 + (p.homeY / state.height) * 0.35;
+        const distSweep = Math.abs(diag - sweepPos);
+        let sweepBoost = 0;
+        if (motion === 'wave' && distSweep < 0.14) {
+          sweepBoost = (1 - distSweep / 0.14) * 0.20 * (0.25 + lum);
+        }
+
+        // Organic 0 <-> 1 character shimmer
+        p.flipTimer -= dt * p.flipSpeed * (0.5 + lum * 1.35 + sweepBoost * 3);
+        if (p.flipTimer <= 0) {
+          p.bit = p.bit === '0' ? '1' : '0';
+          p.flipTimer = 0.38 + Math.random() * 1.95;
+        }
+
+        let targetX = p.homeX;
+        let targetY = p.homeY;
+
+        if (morphFactor > 0.001) {
+          // Vortex Assemble Swirl
+          const swirlAngle = p.angle + morphFactor * (2.6 + (1 - p.dist / maxRadius) * 3.8) * p.spinDir;
+          const radialScale = p.dist * (1 + morphFactor * (0.34 + 0.18 * Math.sin(p.phase + state.time * 2.2)));
+          targetX = centerX + Math.cos(swirlAngle) * radialScale;
+          targetY = centerY + Math.sin(swirlAngle) * radialScale;
+        } else if (motion === 'wave') {
+          // Subtle harmonic depth breathing
+          const breathe = Math.sin(breathePhase - p.dist * 0.012) * 0.006 * lum;
+          targetX = centerX + (p.homeX - centerX) * (1 + breathe);
+          targetY = centerY + (p.homeY - centerY) * (1 + breathe);
+        }
+
+        // Interactive Cursor / Touch Displacement & Spotlight
+        let pointerBoost = 0;
+        if (ptrActive) {
+          const dx = p.x - ptrX;
+          const dy = p.y - ptrY;
+          const dSq = dx * dx + dy * dy;
+          if (dSq < cursorRadius * cursorRadius && dSq > 0.01) {
+            const dist = Math.sqrt(dSq);
+            const force = 1 - dist / cursorRadius;
+            const smoothForce = force * force;
+            targetX += (dx / dist) * smoothForce * cursorPush;
+            targetY += (dy / dist) * smoothForce * cursorPush;
+            pointerBoost = smoothForce * cursorGlow;
+
+            if (Math.random() < smoothForce * 0.25) {
+              p.bit = p.bit === '0' ? '1' : '0';
+            }
+          }
+        }
+
+        const ease = morphFactor > 0.001 ? 0.16 : 0.28;
+        p.x += (targetX - p.x) * ease;
+        p.y += (targetY - p.y) * ease;
+
+        const microShimmer = Math.sin(state.time * 3.4 + p.phase) * 0.028 * lum;
+        const finalLum = Math.max(0.06, Math.min(1, lum + sweepBoost + pointerBoost + microShimmer));
+
+        const [cr, cg, cb] = computePaletteRGB(finalLum, p.r, p.g, p.b, palette);
+        const sprite = glyphCache.get(p.bit, cr, cg, cb);
+
+        ctx.drawImage(sprite, p.x - halfW, p.y - halfH, drawW, drawH);
+      }
+
+      // Optional GPU-accelerated Phosphor Bloom Pass
+      if (state.glow > 0.02) {
+        const bloomScale = 0.22;
+        const gw = Math.max(64, Math.floor(state.width * bloomScale));
+        const gh = Math.max(64, Math.floor(state.height * bloomScale));
+        if (glowCanvas.width !== gw || glowCanvas.height !== gh) {
+          glowCanvas.width = gw;
+          glowCanvas.height = gh;
+        }
+        glowCtx.clearRect(0, 0, gw, gh);
+        glowCtx.drawImage(canvas, 0, 0, gw, gh);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = state.glow * 0.42;
+        ctx.filter = 'blur(8px)';
+        ctx.drawImage(glowCanvas, 0, 0, state.width, state.height);
+        ctx.restore();
+      }
+    }
+
+    /**
+     * Main 60FPS Animation Loop
+     */
+    let lastTimestamp = 0;
+    function animationLoop(now) {
+      const dt = Math.min((now - lastTimestamp) / 1000 || 0.016, 0.05);
+      lastTimestamp = now;
+      state.time += dt;
+
+      drawMatrixFrame(dt);
+      requestAnimationFrame(animationLoop);
+    }
+
+    /**
+     * Activate Binary Portrait View once an Image or Procedural Demo is Ready
+     */
+    function activatePhotoView(imageElement, toastKey = 'processed', triggerVortex = false) {
+      state.sourceImage = imageElement;
+      state.hasPhoto = true;
+
+      ui.welcomeOverlay.classList.add('opacity-0', 'pointer-events-none');
+      if (state.uiVisible) {
+        ui.controlBar.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-6');
+      }
+
+      buildPhotoMatrix();
+
+      if (triggerVortex || state.motion === 'vortex') {
+        state.morphStartTime = state.time;
+      }
+
+      if (toastKey && I18N[state.lang].toasts[toastKey]) {
+        showToast(I18N[state.lang].toasts[toastKey]);
+      }
+    }
+
+    function loadImageFromDataUrl(dataUrl, toastKey = 'processed') {
+      const img = new Image();
+      img.onload = () => {
+        ui.loadingOverlay.classList.add('hidden');
+        ui.loadingOverlay.classList.remove('flex');
+        activatePhotoView(img, toastKey, state.motion === 'vortex');
+      };
+      img.onerror = () => {
+        ui.loadingOverlay.classList.add('hidden');
+        ui.loadingOverlay.classList.remove('flex');
+        showToast(I18N[state.lang].toasts.loadError);
+      };
+      img.src = dataUrl;
+    }
+
+    /**
+     * File Upload & Automatic .HEIC / .HEIF Decoder
+     */
+    async function handleFileUpload(file) {
+      if (!file) return;
+
+      const fileName = (file.name || '').toLowerCase();
+      const fileType = (file.type || '').toLowerCase();
+      const isHeic = fileName.endsWith('.heic') || fileName.endsWith('.heif') ||
+                     fileType === 'image/heic' || fileType === 'image/heif';
+
+      if (!isHeic && !fileType.startsWith('image/')) {
+        showToast(I18N[state.lang].toasts.invalidFile);
+        return;
+      }
+
+      try {
+        let blobToRead = file;
+
+        if (isHeic) {
+          ui.loadingOverlay.classList.remove('hidden');
+          ui.loadingOverlay.classList.add('flex');
+
+          if (typeof heic2any !== 'function') {
+            throw new Error('heic2any library unavailable');
+          }
+
+          const converted = await heic2any({
+            blob: file,
+            toType: 'image/jpeg',
+            quality: 0.94
+          });
+
+          blobToRead = Array.isArray(converted) ? converted[0] : converted;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          loadImageFromDataUrl(ev.target.result, 'processed');
+        };
+        reader.onerror = () => {
+          ui.loadingOverlay.classList.add('hidden');
+          ui.loadingOverlay.classList.remove('flex');
+          showToast(I18N[state.lang].toasts.loadError);
+        };
+        reader.readAsDataURL(blobToRead);
+      } catch (err) {
+        ui.loadingOverlay.classList.add('hidden');
+        ui.loadingOverlay.classList.remove('flex');
+        showToast(I18N[state.lang].toasts.heicError);
+      }
+    }
+
+    /**
+     * Save Crisp High-Resolution PNG Snapshot
+     */
+    function savePngSnapshot() {
+      if (!state.hasPhoto) return;
+      drawMatrixFrame(0);
+      const link = document.createElement('a');
+      link.download = 'binary-portrait.png';
+      link.href = canvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast(I18N[state.lang].toasts.pngSaved);
+    }
+
+    /**
+     * Export Self-Contained Offline HTML with User's Current Image & Settings
+     * (Keeps the main GitHub source code 100% free of personal photos)
+     */
+    function exportStandaloneHtml() {
+      if (!state.hasPhoto || !state.sourceImage) return;
+
+      try {
+        const expCanvas = document.createElement('canvas');
+        const src = state.sourceImage;
+        const origW = src.naturalWidth || src.width;
+        const origH = src.naturalHeight || src.height;
+
+        const maxDim = 1200;
+        const ratio = Math.min(1, maxDim / Math.max(origW, origH));
+        expCanvas.width = Math.round(origW * ratio);
+        expCanvas.height = Math.round(origH * ratio);
+
+        const expCtx = expCanvas.getContext('2d');
+        expCtx.drawImage(src, 0, 0, expCanvas.width, expCanvas.height);
+        const compressedDataUrl = expCanvas.toDataURL('image/jpeg', 0.90);
+
+        let htmlSource = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+        htmlSource = htmlSource.replace(
+          'const EMBEDDED_IMAGE_DATA = null;',
+          `const EMBEDDED_IMAGE_DATA = ${JSON.stringify(compressedDataUrl)};`
+        );
+        htmlSource = htmlSource.replace(
+          /const INITIAL_CONFIG = \{[\s\S]*?\};/,
+          `const INITIAL_CONFIG = ${JSON.stringify({
+            lang: state.lang,
+            palette: state.palette,
+            motion: state.motion,
+            cellSize: state.cellSize,
+            contrast: state.contrast,
+            glow: state.glow
+          })};`
+        );
+
+        const blob = new Blob([htmlSource], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'binary-portrait-standalone.html';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showToast(I18N[state.lang].toasts.htmlExported);
+      } catch (err) {
+        showToast(I18N[state.lang].toasts.loadError);
+      }
+    }
+
+    // Event Listeners
+    ui.welcomeUploadBtn.addEventListener('click', () => ui.imageInput.click());
+    ui.newPhotoBtn.addEventListener('click', () => ui.imageInput.click());
+
+    ui.imageInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleFileUpload(e.target.files[0]);
+        e.target.value = '';
+      }
+    });
+
+    ui.trySampleBtn.addEventListener('click', () => {
+      const demoCanvas = generateProceduralDemoCanvas();
+      activatePhotoView(demoCanvas, 'demoLoaded', true);
+    });
+
+    ui.savePngBtn.addEventListener('click', savePngSnapshot);
+    ui.exportHtmlBtn.addEventListener('click', exportStandaloneHtml);
+
+    ui.langToggleBtn.addEventListener('click', () => {
+      applyLanguage(state.lang === 'tr' ? 'en' : 'tr');
+    });
+
+    ui.paletteSelect.addEventListener('change', (e) => {
+      state.palette = e.target.value;
+    });
+
+    ui.motionSelect.addEventListener('change', (e) => {
+      state.motion = e.target.value;
+      if (state.motion === 'vortex') {
+        state.morphStartTime = state.time;
+      }
+    });
+
+    ui.morphTriggerBtn.addEventListener('click', () => {
+      state.morphStartTime = state.time;
+    });
+
+    // Collapsible Control Dock Drawer
+    ui.collapseDockBtn.addEventListener('click', () => {
+      state.dockCollapsed = !state.dockCollapsed;
+      if (state.dockCollapsed) {
+        ui.dockSlidersRow.classList.add('hidden');
+        ui.collapseChevron.classList.add('rotate-180');
+      } else {
+        ui.dockSlidersRow.classList.remove('hidden');
+        ui.collapseChevron.classList.remove('rotate-180');
+      }
+    });
+
+    ui.densitySlider.addEventListener('input', (e) => {
+      state.cellSize = parseInt(e.target.value, 10);
+      ui.densityVal.textContent = `${state.cellSize}px`;
+      buildPhotoMatrix();
+    });
+
+    ui.contrastSlider.addEventListener('input', (e) => {
+      state.contrast = parseFloat(e.target.value);
+      ui.contrastVal.textContent = state.contrast.toFixed(2);
+    });
+
+    ui.glowSlider.addEventListener('input', (e) => {
+      const pct = parseInt(e.target.value, 10);
+      state.glow = pct / 100;
+      ui.glowVal.textContent = `${pct}%`;
+    });
+
+    // Fullscreen Hide / Show UI ('H' Key or Button)
+    function toggleUiVisibility() {
+      state.uiVisible = !state.uiVisible;
+      const dict = I18N[state.lang];
+      if (state.uiVisible) {
+        if (state.hasPhoto) {
+          ui.controlBar.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-6');
+        }
+        ui.toggleUiText.textContent = dict.hideUi;
+      } else {
+        ui.controlBar.classList.add('opacity-0', 'pointer-events-none', 'translate-y-6');
+        ui.toggleUiText.textContent = dict.showUi;
+        showToast(dict.toasts.uiHidden);
+      }
+    }
+
+    ui.toggleUiBtn.addEventListener('click', toggleUiVisibility);
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'h' && document.activeElement.tagName !== 'INPUT') {
+        toggleUiVisibility();
+      }
+    });
+
+    // Window-wide Drag & Drop
+    let dragCounter = 0;
+    window.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      ui.dropOverlay.classList.remove('hidden');
+      ui.dropOverlay.classList.add('flex');
+    });
+
+    window.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        ui.dropOverlay.classList.add('hidden');
+        ui.dropOverlay.classList.remove('flex');
+      }
+    });
+
+    window.addEventListener('dragover', (e) => e.preventDefault());
+
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      ui.dropOverlay.classList.add('hidden');
+      ui.dropOverlay.classList.remove('flex');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    });
+
+    // Clipboard Paste (Ctrl+V / Cmd+V)
+    window.addEventListener('paste', (e) => {
+      const items = (e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData))?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1 || items[i].kind === 'file') {
+          const file = items[i].getAsFile();
+          if (file) {
+            handleFileUpload(file);
+            break;
+          }
+        }
+      }
+    });
+
+    // Pointer & Touch Tracking
+    function updatePointer(x, y) {
+      state.pointer.x = x;
+      state.pointer.y = y;
+      state.pointer.active = true;
+    }
+
+    canvas.addEventListener('mousemove', (e) => updatePointer(e.clientX, e.clientY));
+    canvas.addEventListener('mouseleave', () => { state.pointer.active = false; });
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 0) {
+        updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 0) {
+        updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchend', () => {
+      state.pointer.active = false;
+    });
+
+    // Responsive Resize Handler
+    let resizeTimeout = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (state.hasPhoto) {
+          buildPhotoMatrix();
+        } else {
+          buildAmbientField();
+        }
+      }, 120);
+    });
+
+    // Initialize Application
+    window.onload = function () {
+      ui.paletteSelect.value = state.palette;
+      ui.motionSelect.value = state.motion;
+      ui.densitySlider.value = state.cellSize;
+      ui.contrastSlider.value = state.contrast;
+      ui.glowSlider.value = Math.round(state.glow * 100);
+
+      ui.densityVal.textContent = `${state.cellSize}px`;
+      ui.contrastVal.textContent = state.contrast.toFixed(2);
+      ui.glowVal.textContent = `${Math.round(state.glow * 100)}%`;
+
+      applyLanguage(state.lang);
+
+      if (EMBEDDED_IMAGE_DATA) {
+        loadImageFromDataUrl(EMBEDDED_IMAGE_DATA, null);
+      } else {
+        buildAmbientField();
+      }
+
+      requestAnimationFrame(animationLoop);
+    };
+  </script>
+</body>
+</html>
